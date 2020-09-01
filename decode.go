@@ -5,6 +5,7 @@
 package fitsio
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -145,13 +146,13 @@ blocks_loop:
 			hdu = &primaryHDU{
 				imageHDU: imageHDU{
 					hdr: *hdr,
-					raw: data,
+					buf: bytes.NewBuffer(data),
 				},
 			}
 		case false:
 			hdu = &imageHDU{
 				hdr: *hdr,
-				raw: data,
+				buf: bytes.NewBuffer(data),
 			}
 		}
 

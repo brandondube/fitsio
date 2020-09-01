@@ -828,19 +828,6 @@ func BenchmarkImageWriteF64_10000(b *testing.B)  { benchImageWrite(b, -64, 10000
 func BenchmarkImageWriteF64_100000(b *testing.B) { benchImageWrite(b, -64, 100000) }
 
 func benchImageWrite(b *testing.B, bitpix int, n int) {
-	w, err := ioutil.TempFile("", "go-test-fitsio-")
-	if err != nil {
-		b.Fatal(err)
-	}
-	defer w.Close()
-	defer os.RemoveAll(w.Name())
-
-	f, err := Create(w)
-	if err != nil {
-		b.Fatal(err)
-	}
-	defer f.Close()
-
 	var ptr interface{}
 	axes := []int{n}
 	switch bitpix {
@@ -895,22 +882,11 @@ func benchImageWrite(b *testing.B, bitpix int, n int) {
 	var img *imageHDU
 	for i := 0; i < b.N; i++ {
 		img = NewImage(bitpix, axes)
-		err = img.Write(ptr)
+		err := img.Write(ptr)
 		if err != nil {
 			b.Fatal(err)
 		}
 		img.Close()
 	}
-
-	err = f.Write(img)
-	if err != nil {
-		b.Fatal(err)
-	}
-
-	err = f.Close()
-	if err != nil {
-		b.Fatal(err)
-	}
-
 	return
 }

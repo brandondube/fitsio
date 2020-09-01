@@ -5,6 +5,7 @@
 package fitsio
 
 import (
+	"bytes"
 	"encoding/binary"
 	"fmt"
 	"image"
@@ -28,16 +29,13 @@ type Image interface {
 // imageHDU is a Header-Data Unit extension holding an image as data payload
 type imageHDU struct {
 	hdr Header
-	raw []byte
+	buf *bytes.Buffer
 }
 
 // NewImage creates a new Image with bitpix size for the pixels and axes as its axes
 func NewImage(bitpix int, axes []int) *imageHDU {
 	hdr := NewHeader(nil, IMAGE_HDU, bitpix, axes)
-	return &imageHDU{
-		hdr: *hdr,
-		raw: make([]byte, 0),
-	}
+	return &imageHDU{hdr: *hdr, buf: new(bytes.Buffer)}
 }
 
 // Close closes this HDU, cleaning up cycles (if any) for garbage collection
@@ -75,13 +73,13 @@ func (img *imageHDU) Version() int {
 
 // Raw returns the raw bytes which make the image
 func (img *imageHDU) Raw() []byte {
-	return img.raw
+	return img.buf.Bytes()
 }
 
 // Read reads the image data into ptr
 func (img *imageHDU) Read(ptr interface{}) error {
 	var err error
-	if img.raw == nil {
+	if img.buf.Len() == 0 {
 		// FIXME(sbinet): load data from file
 		panic(fmt.Errorf("image with no raw data"))
 	}
@@ -119,7 +117,7 @@ func (img *imageHDU) Read(ptr interface{}) error {
 		rv.SetLen(nelmts)
 	}
 
-	r := newReader(img.raw)
+	r := newReader(img.buf.Bytes())
 	switch hdr.Bitpix() {
 	case 8:
 		switch slice := rv.Interface().(type) {
@@ -266,11 +264,47 @@ func (img *imageHDU) Read(ptr interface{}) error {
 	return err
 }
 
+/*
+
+B Dube, sept 1 2020
+
+This code was hugely simplified.  It turns out encoding/binary can do basically
+all of the work, limited only to it not doing the bitpix errors.
+
+signed or unsigned ints are encoded identically, so we need not shift any values
+ourselves.  That seems to be because a modern CPU uses binary two's complement
+for signed ints, meaning their bits are actually the same as a shifted uint.
+
+similarly, floats, at the level of bits, can also just be encoded.
+
+see this example (on the playground, but I think the links expire) to see the
+memory is the same: https://play.golang.org/p/sbILTetK-zW
+
+package main
+
+import (
+	"fmt"
+	"bytes"
+	"encoding/binary"
+)
+
+func main() {
+	slc1 := []int16{-32768}
+	slc2 := []uint16{32768}
+	var b bytes.Buffer
+	binary.Write(&b, binary.BigEndian, slc1)
+	binary.Write(&b, binary.BigEndian, slc2)
+	fmt.Println(b.Bytes())
+}
+>>> [128 0 128 0]
+
+
+*/
+
 // Write writes the given image data to the HDU
 func (img *imageHDU) Write(data interface{}) error {
 	var err error
 	rv := reflect.Indirect(reflect.ValueOf(data))
-
 	hdr := img.Header()
 	naxes := len(hdr.Axes())
 	if naxes == 0 {
@@ -286,68 +320,52 @@ func (img *imageHDU) Write(data interface{}) error {
 		pixsz = -pixsz
 	}
 
-	img.raw = make([]byte, pixsz*nelmts)
-	w := newWriter(img.raw)
 	switch data := rv.Interface().(type) {
 	case []byte:
 		if hdr.Bitpix() != 8 {
 			return fmt.Errorf("fitsio: got a %T but bitpix!=%d", data, hdr.Bitpix())
 		}
-		copy(img.raw, data)
+		img.buf.Write(data) // bdube: buffer docs say err always nil
 
 	case []int8:
 		if hdr.Bitpix() != 8 {
 			return fmt.Errorf("fitsio: got a %T but bitpix!=%d", data, hdr.Bitpix())
 		}
-		for _, v := range data {
-			w.writeI8(v)
-		}
+		binary.Write(img.buf, binary.BigEndian, data)
 
 	case []int16:
 		if hdr.Bitpix() != 16 {
 			return fmt.Errorf("fitsio: got a %T but bitpix!=%d", data, hdr.Bitpix())
 		}
-		for _, v := range data {
-			w.writeI16(v)
-		}
+		binary.Write(img.buf, binary.BigEndian, data)
 
 	case []int32:
 		if hdr.Bitpix() != 32 {
 			return fmt.Errorf("fitsio: got a %T but bitpix!=%d", data, hdr.Bitpix())
 		}
-		for _, v := range data {
-			w.writeI32(v)
-		}
+		binary.Write(img.buf, binary.BigEndian, data)
 
 	case []int64:
 		if hdr.Bitpix() != 64 {
 			return fmt.Errorf("fitsio: got a %T but bitpix!=%d", data, hdr.Bitpix())
 		}
-		for _, v := range data {
-			w.writeI64(v)
-		}
+		binary.Write(img.buf, binary.BigEndian, data)
 
 	case []float32:
 		if hdr.Bitpix() != -32 {
 			return fmt.Errorf("fitsio: got a %T but bitpix!=%d", data, hdr.Bitpix())
 		}
-		for _, v := range data {
-			w.writeF32(v)
-		}
+		binary.Write(img.buf, binary.BigEndian, data)
 
 	case []float64:
 		if hdr.Bitpix() != -64 {
 			return fmt.Errorf("fitsio: got a %T but bitpix!=%d", data, hdr.Bitpix())
 		}
-		for _, v := range data {
-			w.writeF64(v)
-		}
+		binary.Write(img.buf, binary.BigEndian, data)
 
 	default:
 		return fmt.Errorf("fitsio: invalid image type (%T)", rv.Interface())
 	}
-
-	//img.raw = buf.Bytes()
 	return err
 }
 

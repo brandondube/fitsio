@@ -4,7 +4,10 @@
 
 package fitsio
 
-import "reflect"
+import (
+	"bytes"
+	"reflect"
+)
 
 type primaryHDU struct {
 	imageHDU
@@ -76,7 +79,7 @@ func NewPrimaryHDU(hdr *Header) (Image, error) {
 	hdu := &primaryHDU{
 		imageHDU{
 			hdr: phdr,
-			raw: make([]byte, 0),
+			buf: new(bytes.Buffer),
 		},
 	}
 
